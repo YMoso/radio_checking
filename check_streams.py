@@ -5,6 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 input_file = "only_streams_name.xlsx"
 output_file = "OUTPUT/streams_checked.xlsx"
 
+# docker build -t stream-checker .
+# docker run --rm -v "$PWD":/app stream-checker
+
 df = pd.read_excel(input_file)
 df.columns = df.columns.str.strip()
 
@@ -27,8 +30,17 @@ def snap_to_nearest_standard(kbps):
 def process_url(row):
     url = row['Streams']
     print(f"Processing URL: {url}")
+
     result = {'Bitrate': None, 'Audio Codec': None}
+
     try:
+        # For m3u / m3u8 streams, always set hls 128
+        if str(url).lower().endswith((".m3u", ".m3u8")):
+            result['Audio Codec'] = 'hls'
+            result['Bitrate'] = 128
+            print('hls', 128, 'kbps')
+            return result
+
         probe = ffmpeg.probe(url, select_streams="a")
 
         for stream in probe.get('streams', []):
@@ -38,10 +50,8 @@ def process_url(row):
             if codec in ['aac', 'mp4a', 'mp3']:
                 result['Audio Codec'] = codec
 
-                # ✅ Always set AAC to 32 kbps, regardless of actual bit_rate
-                if codec == 'aac':
-                    result['Bitrate'] = 32
-                elif bitrate:
+                # Use real bitrate for AAC / MP4A / MP3
+                if bitrate:
                     kbps = int(bitrate) / 1000
                     result['Bitrate'] = snap_to_nearest_standard(kbps)
                 else:
@@ -49,14 +59,17 @@ def process_url(row):
 
                 print(codec, result['Bitrate'], 'kbps')
                 break
+
         else:
-            result['Audio Codec'] = 'hls'
-            result['Bitrate'] = 128
-            print('hls', 128, 'kbps')
+            result['Audio Codec'] = 'Unknown'
+            result['Bitrate'] = 'Not Available'
+            print('Unknown', 'Not Available')
+
     except Exception as e:
         print(f"Error processing URL {url}: {e}")
         result['Audio Codec'] = 'Error'
         result['Bitrate'] = 'Error'
+
     return result
 
 with ThreadPoolExecutor(max_workers=5) as executor:
