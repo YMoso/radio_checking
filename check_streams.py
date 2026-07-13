@@ -34,14 +34,20 @@ def process_url(row):
     result = {'Bitrate': None, 'Audio Codec': None}
 
     try:
-        # For m3u / m3u8 streams, always set hls 128
-        if str(url).lower().endswith((".m3u", ".m3u8")):
+        url_lower = str(url).lower()
+
+        # Detect m3u / m3u8, including URLs with tokens like ?token=abc
+        is_hls = ".m3u" in url_lower or ".m3u8" in url_lower
+
+        # Probe first to check if the stream actually works
+        probe = ffmpeg.probe(url, select_streams="a")
+
+        # If it is m3u / m3u8 and probe worked, force hls 128
+        if is_hls:
             result['Audio Codec'] = 'hls'
             result['Bitrate'] = 128
             print('hls', 128, 'kbps')
             return result
-
-        probe = ffmpeg.probe(url, select_streams="a")
 
         for stream in probe.get('streams', []):
             codec = stream.get('codec_name', '').lower()
@@ -50,7 +56,6 @@ def process_url(row):
             if codec in ['aac', 'mp4a', 'mp3']:
                 result['Audio Codec'] = codec
 
-                # Use real bitrate for AAC / MP4A / MP3
                 if bitrate:
                     kbps = int(bitrate) / 1000
                     result['Bitrate'] = snap_to_nearest_standard(kbps)
